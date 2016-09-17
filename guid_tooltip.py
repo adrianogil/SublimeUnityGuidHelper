@@ -4,10 +4,57 @@ import os
 import fnmatch
 from os.path import join
 
+class GotoRowColCommand(sublime_plugin.TextCommand):
+        def run(self, edit, row, col):
+                print("INFO: Input: " + str({"row": row, "col": col}))
+                # rows and columns are zero based, so subtract 1
+                # convert text to int
+                (row, col) = (int(row) - 1, int(col) - 1)
+                if row > -1 and col > -1:
+                        # col may be greater than the row length
+                        col = min(col, len(self.view.substr(self.view.full_line(self.view.text_point(row, 0))))-1)
+                        print("INFO: Calculated: " + str({"row": row, "col": col})) # r1.01 (->)
+                        self.view.sel().clear()
+                        self.view.sel().add(sublime.Region(self.view.text_point(row, col)))
+                        self.view.show(self.view.text_point(row, col))
+                else:
+                        print("ERROR: row or col are less than zero")   
+
 class GUIDTooltip(sublime_plugin.EventListener):  
 	files_by_guid = {}
 	filenames_by_guid = {}
 	relative_path_by_guid = {}
+	gameobject_name_by_id = {}
+	row_by_id = {}
+	def parse_yaml(self, view):
+		filename = view.file_name()
+		l = len(filename)
+
+		if filename.lower().endswith(('.unity','.prefab')):
+			with open(filename) as f:
+					content = f.readlines()
+			total_lines = len(content)
+
+			current_go_id = ''
+			found_go = False
+			current_go_line = 0
+
+			for i in range(1, total_lines):
+				line = content[i]
+				last_line = content[i-1]
+
+				if last_line.find('--- !u!') != -1 and line.find("GameObject") != -1:
+					current_go_id = last_line[10:-1]
+					current_go_line = i
+					found_go = True
+
+				if found_go and line.find("m_Name") != -1:
+					self.gameobject_name_by_id[current_go_id] = line[9:-1]
+					self.row_by_id[current_go_id] = current_go_line
+					found_go = False
+					current_go_id = ''
+
+
 	def get_all_guid_files(self, view):
 		window_variables = view.window().extract_variables()
 
@@ -17,6 +64,10 @@ class GUIDTooltip(sublime_plugin.EventListener):
 			project_path = window_variables["project_path"]
 		else:
 			file_name = view.file_name()
+
+			if file_name == None:
+				return False
+
 			for i in range(0,len(file_name)):
 				if file_name[i] == 'A' and file_name[i+1] == 's' and file_name[i+2] == 's' and file_name[i+3] == 'e' and file_name[i+4] == 't' and file_name[i+5] == 's':
 					potential_project_path = file_name[:i]
@@ -46,15 +97,30 @@ class GUIDTooltip(sublime_plugin.EventListener):
 		if not self.get_all_guid_files(view):
 			return
 
+		self.parse_yaml(view)
+
 		for region in view.sel():
 			selected_text = view.substr(region)
 
 			def open_file(file):
 				view.window().open_file(file)
 
+			def go_to_gameobject(id):
+				if view.window().active_view():
+					row = self.row_by_id[id]
+					col = 1
+					print("Trying to go to line " + str(row))
+					view.window().active_view().run_command(
+							"goto_row_col",
+							{"row": row, "col": col}
+					)
+
 			if selected_text in self.files_by_guid:
-				
 				view.set_status('guid_info', self.files_by_guid[selected_text])
 				view.show_popup('<b>' + self.relative_path_by_guid[selected_text] + '</b><br><a href="' + self.files_by_guid[selected_text] + '">Open</a>', on_navigate=open_file)
 
+			if selected_text in self.gameobject_name_by_id:
+				view.set_status('guid_info', self.gameobject_name_by_id[selected_text])
+				view.show_popup('<b>GameObject: ' + self.gameobject_name_by_id[selected_text] + 
+					'</b><br><a href="' + selected_text + '">Show</a>', on_navigate=go_to_gameobject)
 
