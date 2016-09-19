@@ -10,6 +10,10 @@ class GUIDTooltip(sublime_plugin.EventListener):
 	relative_path_by_guid = {}
 	gameobject_name_by_id = {}
 	row_by_id = {}
+
+	transform_id_by_gameobject_id = {}
+	gameobject_id_by_transform_id = {}
+
 	def parse_yaml(self, view):
 		filename = view.file_name()
 		l = len(filename)
@@ -23,10 +27,15 @@ class GUIDTooltip(sublime_plugin.EventListener):
 			found_go = False
 			current_go_line = 0
 
+			current_transform_id = ''
+			found_transform = False
+			current_transform_line = 0
+
 			for i in range(1, total_lines):
 				line = content[i]
 				last_line = content[i-1]
 
+				# GameObject detection
 				if last_line.find('--- !u!') != -1 and line.find("GameObject") != -1:
 					current_go_id = last_line[10:-1]
 					current_go_line = i
@@ -38,6 +47,30 @@ class GUIDTooltip(sublime_plugin.EventListener):
 					found_go = False
 					current_go_id = ''
 
+				# Transform detection
+				if last_line.find('--- !u!') != -1 and line.find("Transform") != -1:
+					current_transform_id = last_line[10:-1]
+					current_transform_line = i
+					found_transform = True
+
+				if found_transform and line.find("m_GameObject: {fileID: ") != -1:
+					line_size = len(line)
+					start_go_id = 0
+					end_go_id = 0
+					for l in range(8, line_size):
+						if line[l-8:l].find('fileID: ') != -1:
+							start_go_id = l
+						elif line[l] == '}':
+							end_go_id = l
+							break
+					go_id = line[start_go_id:end_go_id]
+					self.transform_id_by_gameobject_id[go_id] = current_transform_id
+					self.gameobject_id_by_transform_id[current_transform_id] = go_id
+					self.row_by_id[current_transform_id] = current_transform_line
+					# print("Detected go_id: " + str(go_id) + " related to transform: " + str(current_transform_id))
+					found_transform = False
+					current_transform_id = ''
+					current_transform_line = -1
 
 	def get_all_guid_files(self, view):
 		window_variables = view.window().extract_variables()
@@ -89,7 +122,7 @@ class GUIDTooltip(sublime_plugin.EventListener):
 			def open_file(file):
 				view.window().open_file(file)
 
-			def go_to_gameobject(id):
+			def go_to_reference(id):
 				if view.window().active_view():
 					row = self.row_by_id[id]
 					col = 1
@@ -104,7 +137,19 @@ class GUIDTooltip(sublime_plugin.EventListener):
 				view.show_popup('<b>' + self.relative_path_by_guid[selected_text] + '</b><br><a href="' + self.files_by_guid[selected_text] + '">Open</a>', on_navigate=open_file)
 
 			if selected_text in self.gameobject_name_by_id:
+				popup_text = '<b>GameObject: ' + self.gameobject_name_by_id[selected_text] + \
+					'</b><br><a href="' + selected_text + '">Show definition </a> <br>' + \
+							'<a href="'+ self.transform_id_by_gameobject_id[selected_text] + \
+							'">Show Transform component</a>'
 				view.set_status('guid_info', self.gameobject_name_by_id[selected_text])
-				view.show_popup('<b>GameObject: ' + self.gameobject_name_by_id[selected_text] + 
-					'</b><br><a href="' + selected_text + '">Show</a>', on_navigate=go_to_gameobject)
+				view.show_popup(popup_text, on_navigate=go_to_reference)
+
+			if selected_text in self.gameobject_id_by_transform_id:
+				selected_text = self.gameobject_id_by_transform_id[selected_text]
+				popup_text = '<b>[Transform] GameObject: ' + self.gameobject_name_by_id[selected_text] + \
+					'</b><br><a href="' + selected_text + '">Show definition </a> <br>' + \
+							'<a href="'+ self.transform_id_by_gameobject_id[selected_text] + \
+							'">Show Transform component</a>'
+				view.set_status('guid_info', self.gameobject_name_by_id[selected_text])
+				view.show_popup(popup_text, on_navigate=go_to_reference)
 
