@@ -111,6 +111,11 @@ class GUIDTooltip(sublime_plugin.EventListener):
 		return True
 
 	def on_selection_modified_async(self, view):
+		current_file = view.file_name()
+
+		if current_file is None or (not current_file.lower().endswith(('.unity', '.prefab', '.meta'))):
+			return
+
 		if not self.get_all_guid_files(view):
 			return
 
